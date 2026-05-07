@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QSS Status</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 900px; }
+  h1 { margin-bottom: 0.25rem; }
+  .sub { color: #888; margin-bottom: 1.5rem; }
+  .card { border: 1px solid #8884; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  .row { display: flex; align-items: center; gap: 0.75rem; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: #aaa; flex: none; }
+  .dot.up { background: #22c55e; }
+  .dot.down { background: #ef4444; }
+  .dot.err { background: #f59e0b; }
+  .name { font-weight: 600; flex: 1; }
+  .host { color: #888; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+  .meta { color: #888; font-size: 0.85rem; margin-top: 0.4rem; }
+  details { margin-top: 0.6rem; }
+  pre { background: #8881; padding: 0.6rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; white-space: pre-wrap; }
+  button { padding: 0.45rem 0.9rem; border-radius: 6px; border: 1px solid #8886; background: transparent; cursor: pointer; color: inherit; }
+  button:hover { background: #8882; }
+  .topbar { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+  .topbar .spacer { flex: 1; }
+</style>
+</head>
+<body>
+  <h1>QSS Device Status</h1>
+  <div class="sub">Checking <code>lte</code> process via SSH.</div>
+
+  <div class="topbar">
+    <button id="refresh">Refresh all</button>
+    <label><input type="checkbox" id="auto" checked> Auto-refresh 30s</label>
+    <span class="spacer"></span>
+    <span id="lastrun" class="meta"></span>
+  </div>
+
+  {% for d in devices %}
+  <div class="card" data-id="{{ d.id }}">
+    <div class="row">
+      <div class="dot" id="dot-{{ d.id }}"></div>
+      <div class="name">{{ d.name }}</div>
+      <div class="host">{{ d.host }}</div>
+      <button class="check-one" data-id="{{ d.id }}">Check</button>
+    </div>
+    <div class="meta" id="meta-{{ d.id }}">not checked yet</div>
+    <details id="det-{{ d.id }}" open hidden>
+      <summary>Process output</summary>
+      <pre id="out-{{ d.id }}"></pre>
+    </details>
+  </div>
+  {% endfor %}
+
+<script>
+function render(r) {
+  const dot = document.getElementById('dot-' + r.id);
+  const meta = document.getElementById('meta-' + r.id);
+  const det = document.getElementById('det-' + r.id);
+  const out = document.getElementById('out-' + r.id);
+  dot.classList.remove('up', 'down', 'err');
+  if (r.error) {
+    dot.classList.add('err');
+    meta.textContent = 'Error: ' + r.error;
+    det.hidden = true;
+  } else if (r.running) {
+    dot.classList.add('up');
+    meta.textContent = r.processes.length + ' lte process(es) running';
+    out.textContent = r.processes.join('\n');
+    det.hidden = false;
+  } else {
+    dot.classList.add('down');
+    meta.textContent = 'No lte process running';
+    det.hidden = true;
+  }
+}
+
+async function checkOne(id) {
+  const meta = document.getElementById('meta-' + id);
+  meta.textContent = 'checking...';
+  try {
+    const res = await fetch('/api/check/' + id);
+    render(await res.json());
+  } catch (e) {
+    meta.textContent = 'request failed: ' + e;
+  }
+}
+
+async function checkAll() {
+  document.getElementById('lastrun').textContent = 'checking...';
+  for (const c of document.querySelectorAll('.card')) {
+    document.getElementById('meta-' + c.dataset.id).textContent = 'checking...';
+  }
+  try {
+    const res = await fetch('/api/check-all');
+    const data = await res.json();
+    data.forEach(render);
+    document.getElementById('lastrun').textContent =
+      'last run ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('lastrun').textContent = 'request failed';
+  }
+}
+
+document.getElementById('refresh').onclick = checkAll;
+document.querySelectorAll('.check-one').forEach(b => {
+  b.onclick = () => checkOne(b.dataset.id);
+});
+
+let timer = null;
+function schedule() {
+  if (timer) clearInterval(timer);
+  if (document.getElementById('auto').checked) {
+    timer = setInterval(checkAll, 30000);
+  }
+}
+document.getElementById('auto').onchange = schedule;
+
+checkAll();
+schedule();
+</script>
+</body>
+</html>
